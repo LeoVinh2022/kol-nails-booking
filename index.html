@@ -479,7 +479,7 @@
   </div>
 
   <footer>
-    <p>KOL Nails Studio · 9:00 AM – 8:00 PM · <span data-en="Ho Chi Minh City, Vietnam" data-vi="TP. Hồ Chí Minh, Việt Nam">Ho Chi Minh City, Vietnam</span></p>
+    <p>KOL Nails Studio · 9:00 AM – 8:00 PM · <span data-en="Trang Bom, Dong Nai, Vietnam" data-vi="Trảng Bom, Đồng Nai, Việt Nam">Trang Bom, Dong Nai, Vietnam</span></p>
   </footer>
 </div>
 
@@ -613,7 +613,7 @@ function checkStep4() {
 }
 
 // ── GOOGLE SHEET URL ──
-const SHEET_URL = 'https://script.google.com/macros/s/AKfycbyz_HFuT64wmkZ0Iw6hk35QfZSQp5brZyMkDwWgmodndlmngGdFPdY6RonkhtJK4B7DHA/exec';
+const SHEET_URL = 'https://script.google.com/macros/s/AKfycbxKnZLMbHnPUzn3tGeXu_sFmQFsQdfzKBJ5ShY8GurtjEenr40fDWHN6o1AB-sDSvdG6A/exec';
 
 // ── CONFIRM ──
 async function confirmBooking() {
@@ -622,66 +622,48 @@ async function confirmBooking() {
   const note  = document.getElementById('custNote').value.trim();
   const ref   = 'KOL-' + Date.now().toString(36).toUpperCase().slice(-6);
 
-  // Disable button & show loading
   const btn = document.getElementById('btn4');
   btn.disabled = true;
   btn.textContent = lang === 'vi' ? 'Đang kiểm tra...' : 'Checking availability...';
 
   try {
-    // Step 1: Check for conflict in Google Sheet
-    const checkRes = await fetch(SHEET_URL, {
-      method: 'POST',
-      body: JSON.stringify({
-        action: 'check',
-        staff:  booking.staff,
-        date:   booking.dateLabel,
-        time:   booking.time,
-      })
-    });
-    const checkData = await checkRes.json();
+    // Single atomic check+book call to prevent race condition
+    const payload = {
+      action:   'book',
+      ref,
+      name,
+      phone,
+      service:  booking.service,
+      staff:    booking.staff,
+      date:     booking.dateLabel,
+      time:     booking.time,
+      note:     note || (lang === 'vi' ? 'Không có' : 'None'),
+      bookedAt: new Date().toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' }),
+    };
 
-    if (checkData.conflict) {
-      // Slot already taken — alert user
-      btn.disabled = false;
-      btn.textContent = lang === 'vi' ? 'Xác nhận đặt lịch ✓' : 'Confirm Booking ✓';
-      const msg = lang === 'vi'
-        ? '⚠️ Rất tiếc! Khung giờ này đã được đặt bởi khách khác.\nVui lòng chọn giờ hoặc nhân viên khác.'
-        : '⚠️ Sorry! This time slot is already booked.\nPlease choose a different time or staff.';
-      alert(msg);
-      return;
-    }
-
-    // Step 2: No conflict — save to Google Sheet
     btn.textContent = lang === 'vi' ? 'Đang đặt lịch...' : 'Booking...';
-    const bookRes = await fetch(SHEET_URL, {
-      method: 'POST',
-      body: JSON.stringify({
-        action:    'book',
-        ref,
-        name,
-        phone,
-        service:   booking.service,
-        staff:     booking.staff,
-        date:      booking.dateLabel,
-        time:      booking.time,
-        note:      note || (lang === 'vi' ? 'Không có' : 'None'),
-        bookedAt:  new Date().toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' }),
-      })
-    });
-    const bookData = await bookRes.json();
 
-    if (!bookData.success) {
-      // Race condition — someone booked just before
+    // Use no-cors fetch via form trick to handle CORS from Apps Script
+    const res = await fetch(SHEET_URL, {
+      method:  'POST',
+      headers: { 'Content-Type': 'text/plain' },
+      body:    JSON.stringify(payload),
+    });
+
+    const data = await res.json();
+
+    if (data.conflict || !data.success) {
       btn.disabled = false;
       btn.textContent = lang === 'vi' ? 'Xác nhận đặt lịch ✓' : 'Confirm Booking ✓';
-      const msg = lang === 'vi'
-        ? '⚠️ Rất tiếc! Khung giờ vừa được đặt bởi người khác.\nVui lòng chọn giờ hoặc nhân viên khác.'
-        : '⚠️ Sorry! This slot was just taken by someone else.\nPlease choose a different time or staff.';
-      alert(msg);
+      alert(lang === 'vi'
+        ? '⚠️ Rất tiếc! Khung giờ này đã được đặt.\nVui lòng chọn giờ hoặc nhân viên khác.'
+        : '⚠️ Sorry! This time slot is already booked.\nPlease choose a different time or staff.');
+      // Refresh time grid to visually mark slot as taken
+      buildTimeGrid();
       return;
     }
 
-    // Step 3: Send email via EmailJS
+    // Success — send email
     try {
       await emailjs.send('service_axxj2sz', 'template_y5qicrb', {
         to_email:    'maihoanghung@gmail.com',
@@ -695,18 +677,16 @@ async function confirmBooking() {
         note:        note || (lang === 'vi' ? 'Không có' : 'None'),
         booked_at:   new Date().toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' }),
       });
-    } catch (err) {
-      console.error('EmailJS error:', err);
-    }
+    } catch (e) { console.error('Email error:', e); }
 
-    // Step 4: Show success screen
-    document.getElementById('step4').style.display = 'none';
+    // Show success screen
+    document.getElementById('step4').style.display      = 'none';
     document.getElementById('stepSuccess').style.display = 'block';
     document.getElementById('bookingRef').textContent    = ref;
     document.getElementById('conf-service').textContent  = booking.service;
     document.getElementById('conf-staff').textContent    = booking.staff;
     document.getElementById('conf-datetime').textContent = booking.dateLabel + ' · ' + booking.time;
-    document.querySelector('.steps').style.display = 'none';
+    document.querySelector('.steps').style.display       = 'none';
     setLang(lang);
 
   } catch (err) {
