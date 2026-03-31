@@ -624,79 +624,53 @@ async function confirmBooking() {
 
   const btn = document.getElementById('btn4');
   btn.disabled = true;
-  btn.textContent = lang === 'vi' ? 'Đang kiểm tra...' : 'Checking availability...';
+  btn.textContent = lang === 'vi' ? 'Đang đặt lịch...' : 'Booking...';
 
+  const payload = {
+    action:   'book',
+    ref,
+    name,
+    phone,
+    service:  booking.service,
+    staff:    booking.staff,
+    date:     booking.dateLabel,
+    time:     booking.time,
+    note:     note || (lang === 'vi' ? 'Không có' : 'None'),
+    bookedAt: new Date().toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' }),
+  };
+
+  // Send to Google Sheet (fire-and-forget, no conflict check)
+  fetch(SHEET_URL, {
+    method:  'POST',
+    headers: { 'Content-Type': 'text/plain' },
+    body:    JSON.stringify(payload),
+  }).catch(e => console.error('Sheet error:', e));
+
+  // Send email notification
   try {
-    // Single atomic check+book call to prevent race condition
-    const payload = {
-      action:   'book',
-      ref,
-      name,
-      phone,
-      service:  booking.service,
-      staff:    booking.staff,
-      date:     booking.dateLabel,
-      time:     booking.time,
-      note:     note || (lang === 'vi' ? 'Không có' : 'None'),
-      bookedAt: new Date().toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' }),
-    };
-
-    btn.textContent = lang === 'vi' ? 'Đang đặt lịch...' : 'Booking...';
-
-    // Use no-cors fetch via form trick to handle CORS from Apps Script
-    const res = await fetch(SHEET_URL, {
-      method:  'POST',
-      headers: { 'Content-Type': 'text/plain' },
-      body:    JSON.stringify(payload),
+    await emailjs.send('service_axxj2sz', 'template_y5qicrb', {
+      to_email:    'maihoanghung@gmail.com',
+      booking_ref: ref,
+      cust_name:   name,
+      cust_phone:  phone,
+      service:     booking.service,
+      staff:       booking.staff,
+      date:        booking.dateLabel,
+      time:        booking.time,
+      note:        note || (lang === 'vi' ? 'Không có' : 'None'),
+      booked_at:   new Date().toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' }),
     });
+  } catch (e) { console.error('Email error:', e); }
 
-    const data = await res.json();
-
-    if (data.conflict || !data.success) {
-      btn.disabled = false;
-      btn.textContent = lang === 'vi' ? 'Xác nhận đặt lịch ✓' : 'Confirm Booking ✓';
-      alert(lang === 'vi'
-        ? '⚠️ Rất tiếc! Khung giờ này đã được đặt.\nVui lòng chọn giờ hoặc nhân viên khác.'
-        : '⚠️ Sorry! This time slot is already booked.\nPlease choose a different time or staff.');
-      // Refresh time grid to visually mark slot as taken
-      buildTimeGrid();
-      return;
-    }
-
-    // Success — send email
-    try {
-      await emailjs.send('service_axxj2sz', 'template_y5qicrb', {
-        to_email:    'maihoanghung@gmail.com',
-        booking_ref: ref,
-        cust_name:   name,
-        cust_phone:  phone,
-        service:     booking.service,
-        staff:       booking.staff,
-        date:        booking.dateLabel,
-        time:        booking.time,
-        note:        note || (lang === 'vi' ? 'Không có' : 'None'),
-        booked_at:   new Date().toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' }),
-      });
-    } catch (e) { console.error('Email error:', e); }
-
-    // Show success screen
-    document.getElementById('step4').style.display      = 'none';
-    document.getElementById('stepSuccess').style.display = 'block';
-    document.getElementById('bookingRef').textContent    = ref;
-    document.getElementById('conf-service').textContent  = booking.service;
-    document.getElementById('conf-staff').textContent    = booking.staff;
-    document.getElementById('conf-datetime').textContent = booking.dateLabel + ' · ' + booking.time;
-    document.querySelector('.steps').style.display       = 'none';
-    setLang(lang);
-
-  } catch (err) {
-    console.error('Booking error:', err);
-    btn.disabled = false;
-    btn.textContent = lang === 'vi' ? 'Xác nhận đặt lịch ✓' : 'Confirm Booking ✓';
-    alert(lang === 'vi'
-      ? '❌ Lỗi kết nối. Vui lòng thử lại.'
-      : '❌ Connection error. Please try again.');
-  }
+  // Always show success screen immediately
+  document.getElementById('step4').style.display      = 'none';
+  document.getElementById('stepSuccess').style.display = 'block';
+  document.getElementById('bookingRef').textContent    = ref;
+  document.getElementById('conf-service').textContent  = booking.service;
+  document.getElementById('conf-staff').textContent    = booking.staff;
+  document.getElementById('conf-datetime').textContent = booking.dateLabel + ' · ' + booking.time;
+  document.querySelector('.steps').style.display       = 'none';
+  setLang(lang);
 }
 
 // ── RESET ──
